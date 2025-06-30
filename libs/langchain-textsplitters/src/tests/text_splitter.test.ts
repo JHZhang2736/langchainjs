@@ -155,6 +155,34 @@ describe("Character text splitter", () => {
     ];
     expect(docs).toEqual(expectedDocs);
   });
+
+  test("Keep whitespace between chunks when stripWhitespace is false", async () => {
+    const text = "_foo _bar  \n  _baz";
+    const splitter = new CharacterTextSplitter({
+      separator: "_",
+      chunkSize: 7,
+      chunkOverlap: 0,
+      stripWhitespace: false,
+    });
+    const output = await splitter.splitText(text);
+    const expectedOutput = ["foo ", "bar  \n  ", "baz"];
+    expect(output).toEqual(expectedOutput);
+  });
+
+  test("whitespaces should be kept at the end of the chunk when whitespaceAtSplitEnd is true", async () => {
+    const text = " foo _bar  \n _baz";
+    const splitter = new CharacterTextSplitter({
+      separator: "_",
+      chunkSize: 10,
+      chunkOverlap: 0,
+      whitespaceAtSplitEnd: true,
+      stripWhitespace: false,
+    });
+    const output = await splitter.splitText(text);
+    console.log(output);
+    const expectedOutput = [" foo ", "bar  \n ", "baz"];
+    expect(output).toEqual(expectedOutput);
+  });
 });
 
 describe("RecursiveCharacter text splitter", () => {
@@ -514,3 +542,5 @@ test("Test lines loc on iterative text splitter.", async () => {
 
   expect(docs).toEqual(expectedDocs);
 });
+
+

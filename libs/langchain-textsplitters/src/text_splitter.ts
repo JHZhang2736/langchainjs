@@ -6,9 +6,11 @@ export interface TextSplitterParams {
   chunkSize: number;
   chunkOverlap: number;
   keepSeparator: boolean;
+  stripWhitespace: boolean;
+  whitespaceAtSplitEnd: boolean;
   lengthFunction?:
-    | ((text: string) => number)
-    | ((text: string) => Promise<number>);
+  | ((text: string) => number)
+  | ((text: string) => Promise<number>);
 }
 
 export type TextSplitterChunkHeaderOptions = {
@@ -19,8 +21,7 @@ export type TextSplitterChunkHeaderOptions = {
 
 export abstract class TextSplitter
   extends BaseDocumentTransformer
-  implements TextSplitterParams
-{
+  implements TextSplitterParams {
   lc_namespace = ["langchain", "document_transformers", "text_splitters"];
 
   chunkSize = 1000;
@@ -28,6 +29,10 @@ export abstract class TextSplitter
   chunkOverlap = 200;
 
   keepSeparator = false;
+
+  stripWhitespace = true;
+
+  whitespaceAtSplitEnd = false;
 
   lengthFunction:
     | ((text: string) => number)
@@ -38,6 +43,8 @@ export abstract class TextSplitter
     this.chunkSize = fields?.chunkSize ?? this.chunkSize;
     this.chunkOverlap = fields?.chunkOverlap ?? this.chunkOverlap;
     this.keepSeparator = fields?.keepSeparator ?? this.keepSeparator;
+    this.whitespaceAtSplitEnd = fields?.whitespaceAtSplitEnd ?? this.whitespaceAtSplitEnd;
+    this.stripWhitespace = fields?.stripWhitespace ?? this.stripWhitespace;
     this.lengthFunction =
       fields?.lengthFunction ?? ((text: string) => text.length);
     if (this.chunkOverlap >= this.chunkSize) {
@@ -177,7 +184,10 @@ export abstract class TextSplitter
   }
 
   private joinDocs(docs: string[], separator: string): string | null {
-    const text = docs.join(separator).trim();
+    let text = docs.join(separator);
+    if (this.stripWhitespace) {
+      text = text.trim();
+    }
     return text === "" ? null : text;
   }
 
@@ -233,8 +243,7 @@ export interface CharacterTextSplitterParams extends TextSplitterParams {
 
 export class CharacterTextSplitter
   extends TextSplitter
-  implements CharacterTextSplitterParams
-{
+  implements CharacterTextSplitterParams {
   static lc_name() {
     return "CharacterTextSplitter";
   }
@@ -282,8 +291,7 @@ export type SupportedTextSplitterLanguage =
 
 export class RecursiveCharacterTextSplitter
   extends TextSplitter
-  implements RecursiveCharacterTextSplitterParams
-{
+  implements RecursiveCharacterTextSplitterParams {
   static lc_name() {
     return "RecursiveCharacterTextSplitter";
   }
@@ -346,7 +354,27 @@ export class RecursiveCharacterTextSplitter
   }
 
   async splitText(text: string): Promise<string[]> {
-    return this._splitText(text, this.separators);
+    const splits = await this._splitText(text, this.separators);
+    if (this.whitespaceAtSplitEnd) {
+      // putting leading space and newline to the previous chunk
+      let splitsSpaceAtEnd: string[] = [];
+      for (let i = 0; i < splits.length; i++) {
+        if (i === 0) {
+          splitsSpaceAtEnd.push(splits[i]);
+        } else {
+          const leadingSpaces = splits[i].match(/^\s+/);
+          if (leadingSpaces) {
+            splitsSpaceAtEnd[splitsSpaceAtEnd.length - 1] += leadingSpaces[0];
+            splits[i] = splits[i].slice(leadingSpaces[0].length);
+          }
+          if (splits[i] !== "") {
+            splitsSpaceAtEnd.push(splits[i]);
+          }
+        }
+      }
+      return splitsSpaceAtEnd.filter((s) => s !== "");
+    }
+    return splits;
   }
 
   static fromLanguage(
@@ -721,8 +749,7 @@ export interface TokenTextSplitterParams extends TextSplitterParams {
  */
 export class TokenTextSplitter
   extends TextSplitter
-  implements TokenTextSplitterParams
-{
+  implements TokenTextSplitterParams {
   static lc_name() {
     return "TokenTextSplitter";
   }
@@ -776,8 +803,7 @@ export type MarkdownTextSplitterParams = TextSplitterParams;
 
 export class MarkdownTextSplitter
   extends RecursiveCharacterTextSplitter
-  implements MarkdownTextSplitterParams
-{
+  implements MarkdownTextSplitterParams {
   constructor(fields?: Partial<MarkdownTextSplitterParams>) {
     super({
       ...fields,
@@ -791,8 +817,7 @@ export type LatexTextSplitterParams = TextSplitterParams;
 
 export class LatexTextSplitter
   extends RecursiveCharacterTextSplitter
-  implements LatexTextSplitterParams
-{
+  implements LatexTextSplitterParams {
   constructor(fields?: Partial<LatexTextSplitterParams>) {
     super({
       ...fields,
