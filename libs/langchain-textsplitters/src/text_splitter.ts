@@ -7,10 +7,16 @@ export interface TextSplitterParams {
   chunkOverlap: number;
   keepSeparator: boolean;
   stripWhitespace: boolean;
-  whitespaceAtSplitEnd: boolean;
   lengthFunction?:
   | ((text: string) => number)
   | ((text: string) => Promise<number>);
+}
+
+interface ChunkWithMetadata {
+  text: string;
+  position: number;
+  overlap: number;
+  length: number;
 }
 
 export type TextSplitterChunkHeaderOptions = {
@@ -32,8 +38,6 @@ export abstract class TextSplitter
 
   stripWhitespace = true;
 
-  whitespaceAtSplitEnd = false;
-
   lengthFunction:
     | ((text: string) => number)
     | ((text: string) => Promise<number>);
@@ -43,7 +47,6 @@ export abstract class TextSplitter
     this.chunkSize = fields?.chunkSize ?? this.chunkSize;
     this.chunkOverlap = fields?.chunkOverlap ?? this.chunkOverlap;
     this.keepSeparator = fields?.keepSeparator ?? this.keepSeparator;
-    this.whitespaceAtSplitEnd = fields?.whitespaceAtSplitEnd ?? this.whitespaceAtSplitEnd;
     this.stripWhitespace = fields?.stripWhitespace ?? this.stripWhitespace;
     this.lengthFunction =
       fields?.lengthFunction ?? ((text: string) => text.length);
@@ -61,22 +64,56 @@ export abstract class TextSplitter
 
   abstract splitText(text: string): Promise<string[]>;
 
-  protected splitOnSeparator(text: string, separator: string): string[] {
-    let splits;
-    if (separator) {
-      if (this.keepSeparator) {
-        const regexEscapedSeparator = separator.replace(
-          /[/\-\\^$*+?.()|[\]{}]/g,
-          "\\$&"
-        );
-        splits = text.split(new RegExp(`(?=${regexEscapedSeparator})`));
-      } else {
-        splits = text.split(separator);
+  protected async splitOnSeparator(text: string, separator: string, offset: number = 0): Promise<ChunkWithMetadata[]> {
+    const chunks: ChunkWithMetadata[] = [];
+    if (!separator) {
+      for (let i = 0; i < text.length; i++) {
+        chunks.push({
+          text: text[i],
+          position: offset + i,
+          overlap: 0,
+          length: 1,
+        });
       }
-    } else {
-      splits = text.split("");
+      return chunks;
     }
-    return splits.filter((s) => s !== "");
+
+    const regexEscapedSeparator = separator.replace(
+      /[/\-\\^$*+?.()|[\]{}]/g,
+      "\\$&"
+    );
+    const regex = new RegExp(regexEscapedSeparator, "g");
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = regex.exec(text)) !== null) {
+      const chunkText = text.slice(lastIndex, match.index);
+      if (chunkText !== "" || lastIndex === 0) {
+        chunks.push({
+          text: chunkText,
+          position: offset + lastIndex,
+          overlap: 0,
+          length: await this.lengthFunction(chunkText),
+        });
+      }
+
+      if (this.keepSeparator) {
+        lastIndex = match.index;
+      } else {
+        lastIndex = match.index + match[0].length;
+      }
+    }
+
+    const chunkText = text.slice(lastIndex);
+    if (lastIndex < text.length) {
+      chunks.push({
+        text: chunkText,
+        position: offset + lastIndex,
+        overlap: 0,
+        length: await this.lengthFunction(chunkText),
+      });
+    }
+    return chunks;
   }
 
   async createDocuments(
@@ -183,20 +220,31 @@ export abstract class TextSplitter
     return this.createDocuments(texts, metadatas, chunkHeaderOptions);
   }
 
-  private joinDocs(docs: string[], separator: string): string | null {
-    let text = docs.join(separator);
+  private async joinDocs(docs: ChunkWithMetadata[], separator: string): Promise<ChunkWithMetadata | null> {
+    const texts = docs.map((doc) => doc.text);
+    let text = texts.join(separator);
     if (this.stripWhitespace) {
       text = text.trim();
     }
-    return text === "" ? null : text;
+    const length = await this.lengthFunction(text);
+    const chunkWithMetadata = {
+      text,
+      position: docs[0].position,
+      overlap: 0,
+      length,
+    };
+    return text === "" ? null : chunkWithMetadata;
   }
 
-  async mergeSplits(splits: string[], separator: string): Promise<string[]> {
-    const docs: string[] = [];
-    const currentDoc: string[] = [];
+  async mergeSplits(splits: ChunkWithMetadata[], separator: string): Promise<ChunkWithMetadata[]> {
+    const docs: ChunkWithMetadata[] = [];
+    const currentDoc: ChunkWithMetadata[] = [];
+    let lastMergedDoc: number[] = [];
+    const mergingDocs: number[] = [];
     let total = 0;
-    for (const d of splits) {
-      const _len = await this.lengthFunction(d);
+    for (let i = 0; i < splits.length; i++) {
+      const d = splits[i];
+      const _len = d.length;
       if (
         total + _len + currentDoc.length * separator.length >
         this.chunkSize
@@ -208,9 +256,13 @@ which is longer than the specified ${this.chunkSize}`
           );
         }
         if (currentDoc.length > 0) {
-          const doc = this.joinDocs(currentDoc, separator);
+          const doc = await this.joinDocs(currentDoc, separator);
           if (doc !== null) {
+            const overlapChunks = lastMergedDoc.filter(index => mergingDocs.includes(index));
+            const overlapLength = overlapChunks.reduce((acc, index) => acc + splits[index].length, 0);
+            doc.overlap = overlapLength;
             docs.push(doc);
+            lastMergedDoc = [...mergingDocs];
           }
           // Keep on popping if:
           // - we have a larger chunk than in the chunk overlap
@@ -221,16 +273,21 @@ which is longer than the specified ${this.chunkSize}`
               this.chunkSize &&
               total > 0)
           ) {
-            total -= await this.lengthFunction(currentDoc[0]);
+            total -= currentDoc[0].length;
             currentDoc.shift();
+            mergingDocs.shift();
           }
         }
       }
       currentDoc.push(d);
+      mergingDocs.push(i);
       total += _len;
     }
-    const doc = this.joinDocs(currentDoc, separator);
+    const doc = await this.joinDocs(currentDoc, separator);
     if (doc !== null) {
+      const overlapChunks = lastMergedDoc.filter(index => mergingDocs.includes(index));
+      const overlapLength = overlapChunks.reduce((acc, index) => acc + splits[index].length, 0);
+      doc.overlap = overlapLength;
       docs.push(doc);
     }
     return docs;
@@ -257,8 +314,8 @@ export class CharacterTextSplitter
 
   async splitText(text: string): Promise<string[]> {
     // First we naively split the large input into a bunch of smaller ones.
-    const splits = this.splitOnSeparator(text, this.separator);
-    return this.mergeSplits(splits, this.keepSeparator ? "" : this.separator);
+    const splits = await this.splitOnSeparator(text, this.separator);
+    return (await this.mergeSplits(splits, this.keepSeparator ? "" : this.separator)).map((chunk) => chunk.text);
   }
 }
 
@@ -304,8 +361,8 @@ export class RecursiveCharacterTextSplitter
     this.keepSeparator = fields?.keepSeparator ?? true;
   }
 
-  private async _splitText(text: string, separators: string[]) {
-    const finalChunks: string[] = [];
+  private async _splitText(chunk: ChunkWithMetadata, separators: string[], offset: number = 0): Promise<ChunkWithMetadata[]> {
+    const finalChunks: ChunkWithMetadata[] = [];
 
     // Get appropriate separator to use
     let separator: string = separators[separators.length - 1];
@@ -316,7 +373,7 @@ export class RecursiveCharacterTextSplitter
         separator = s;
         break;
       }
-      if (text.includes(s)) {
+      if (chunk.text.includes(s)) {
         separator = s;
         newSeparators = separators.slice(i + 1);
         break;
@@ -324,13 +381,13 @@ export class RecursiveCharacterTextSplitter
     }
 
     // Now that we have the separator, split the text
-    const splits = this.splitOnSeparator(text, separator);
+    const splits = await this.splitOnSeparator(chunk.text, separator, offset);
 
     // Now go merging things, recursively splitting longer texts.
-    let goodSplits: string[] = [];
+    let goodSplits: ChunkWithMetadata[] = [];
     const _separator = this.keepSeparator ? "" : separator;
     for (const s of splits) {
-      if ((await this.lengthFunction(s)) < this.chunkSize) {
+      if (s.length < this.chunkSize) {
         goodSplits.push(s);
       } else {
         if (goodSplits.length) {
@@ -341,7 +398,7 @@ export class RecursiveCharacterTextSplitter
         if (!newSeparators) {
           finalChunks.push(s);
         } else {
-          const otherInfo = await this._splitText(s, newSeparators);
+          const otherInfo = await this._splitText(s, newSeparators, s.position);
           finalChunks.push(...otherInfo);
         }
       }
@@ -354,26 +411,15 @@ export class RecursiveCharacterTextSplitter
   }
 
   async splitText(text: string): Promise<string[]> {
-    const splits = await this._splitText(text, this.separators);
-    if (this.whitespaceAtSplitEnd) {
-      // putting leading space and newline to the previous chunk
-      let splitsSpaceAtEnd: string[] = [];
-      for (let i = 0; i < splits.length; i++) {
-        if (i === 0) {
-          splitsSpaceAtEnd.push(splits[i]);
-        } else {
-          const leadingSpaces = splits[i].match(/^\s+/);
-          if (leadingSpaces) {
-            splitsSpaceAtEnd[splitsSpaceAtEnd.length - 1] += leadingSpaces[0];
-            splits[i] = splits[i].slice(leadingSpaces[0].length);
-          }
-          if (splits[i] !== "") {
-            splitsSpaceAtEnd.push(splits[i]);
-          }
-        }
-      }
-      return splitsSpaceAtEnd.filter((s) => s !== "");
+    const splits = (await this._splitText({ text, position: 0, overlap: 0, length: text.length }, this.separators)).map((chunk) => chunk.text);
+    return splits;
+  }
+
+  async splitTextWithMetadata(text: string): Promise<ChunkWithMetadata[]> {
+    if (this.stripWhitespace || this.keepSeparator) {
+      console.warn("Might not produce correct results when stripWhitespace = true and keepSeparator = false");
     }
+    const splits = await this._splitText({ text, position: 0, overlap: 0, length: text.length }, this.separators);
     return splits;
   }
 

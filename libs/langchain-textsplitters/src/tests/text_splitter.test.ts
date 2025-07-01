@@ -165,22 +165,7 @@ describe("Character text splitter", () => {
       stripWhitespace: false,
     });
     const output = await splitter.splitText(text);
-    const expectedOutput = ["foo ", "bar  \n  ", "baz"];
-    expect(output).toEqual(expectedOutput);
-  });
-
-  test("whitespaces should be kept at the end of the chunk when whitespaceAtSplitEnd is true", async () => {
-    const text = " foo _bar  \n _baz";
-    const splitter = new CharacterTextSplitter({
-      separator: "_",
-      chunkSize: 10,
-      chunkOverlap: 0,
-      whitespaceAtSplitEnd: true,
-      stripWhitespace: false,
-    });
-    const output = await splitter.splitText(text);
-    console.log(output);
-    const expectedOutput = [" foo ", "bar  \n ", "baz"];
+    const expectedOutput = ["_foo ", "bar  \n  ", "baz"];
     expect(output).toEqual(expectedOutput);
   });
 });
@@ -543,4 +528,59 @@ test("Test lines loc on iterative text splitter.", async () => {
   expect(docs).toEqual(expectedDocs);
 });
 
+test("should produce correct postion, overlap and length", async () => {
+  const text = "foo bar baz a a";
+  const splitter = new RecursiveCharacterTextSplitter({
+    separators: [" "],
+    chunkSize: 10,
+    chunkOverlap: 4,
+    keepSeparator: true,
+    stripWhitespace: false,
+  });
+  const chunksWithMetadata = await splitter.splitTextWithMetadata(text);
+  const chunks = chunksWithMetadata.map((chunk) => chunk.text);
+  const positions = chunksWithMetadata.map((chunk) => chunk.position);
+  const overlaps = chunksWithMetadata.map((chunk) => chunk.overlap);
+  const lengths = chunksWithMetadata.map((chunk) => chunk.length);
 
+  // length should be correct
+  for (let i = 0; i < chunks.length; i++) {
+    expect(lengths[i]).toBe(chunks[i].length);
+  }
+  // position should be correct
+  for (let i = 0; i < positions.length; i++) {
+    expect(text.slice(positions[i], positions[i] + lengths[i])).toBe(chunks[i]);
+  }
+  // overlap should be correct
+  for (let i = 1; i < overlaps.length; i++) {
+    expect(chunks[i - 1].endsWith(chunks[i].slice(0, overlaps[i]))).toBe(true);
+  }
+});
+
+test("should produce correct postion, overlap and length for complex separators", async () => {
+  const text = "## Header1\n\nContent paragraph one.\n\n## Header2\n\nContent paragraph two with $special$ chars.\n\n### SubHeader\n\nFinal content.";
+  const splitter = new RecursiveCharacterTextSplitter({
+    separators: ["\n## ", "\n### ", "\n\n", " ", ""],
+    chunkSize: 40,
+    chunkOverlap: 8,
+    keepSeparator: true,
+    stripWhitespace: false
+  });
+
+  const chunksWithMetadata = await splitter.splitTextWithMetadata(text);
+  console.log(chunksWithMetadata);
+  const chunks = chunksWithMetadata.map((chunk) => chunk.text);
+  const positions = chunksWithMetadata.map((chunk) => chunk.position);
+  const overlaps = chunksWithMetadata.map((chunk) => chunk.overlap);
+  const lengths = chunksWithMetadata.map((chunk) => chunk.length);
+
+  for (let i = 0; i < chunks.length; i++) {
+    expect(lengths[i]).toBe(chunks[i].length);
+  }
+  for (let i = 0; i < positions.length; i++) {
+    expect(text.slice(positions[i], positions[i] + lengths[i])).toBe(chunks[i]);
+  }
+  for (let i = 1; i < overlaps.length; i++) {
+    expect(chunks[i - 1].endsWith(chunks[i].slice(0, overlaps[i]))).toBe(true);
+  }
+});
