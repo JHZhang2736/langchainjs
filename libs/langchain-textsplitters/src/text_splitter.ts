@@ -416,7 +416,7 @@ export class RecursiveCharacterTextSplitter
   }
 
   async splitTextWithMetadata(text: string): Promise<ChunkWithMetadata[]> {
-    if (this.stripWhitespace || this.keepSeparator) {
+    if (this.stripWhitespace === true || this.keepSeparator === false) {
       console.warn("Might not produce correct results when stripWhitespace = true and keepSeparator = false");
     }
     const splits = await this._splitText({ text, position: 0, overlap: 0, length: text.length }, this.separators);

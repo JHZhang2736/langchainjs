@@ -568,7 +568,6 @@ test("should produce correct postion, overlap and length for complex separators"
   });
 
   const chunksWithMetadata = await splitter.splitTextWithMetadata(text);
-  console.log(chunksWithMetadata);
   const chunks = chunksWithMetadata.map((chunk) => chunk.text);
   const positions = chunksWithMetadata.map((chunk) => chunk.position);
   const overlaps = chunksWithMetadata.map((chunk) => chunk.overlap);
