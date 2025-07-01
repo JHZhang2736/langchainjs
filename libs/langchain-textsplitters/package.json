@@ -14,7 +14,8 @@
   },
   "homepage": "https://github.com/langchain-ai/langchainjs/tree/main/libs/langchain-textsplitters/",
   "scripts": {
-    "build": "yarn turbo:command build:internal --filter=@langchain/textsplitters",
+    "build": "yarn run compile",
+    "compile": "tsc -b",
     "build:internal": "yarn lc_build --create-entrypoints --pre --tree-shaking",
     "lint:eslint": "NODE_OPTIONS=--max-old-space-size=4096 eslint --cache --ext .ts,.js src/",
     "lint:dpdm": "dpdm --skip-dynamic-imports circular --exit-code circular:1 --no-warning --no-tree src/*.ts src/**/*.ts",
@@ -67,21 +68,18 @@
   },
   "exports": {
     ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
       "types": {
-        "import": "./index.d.ts",
-        "require": "./index.d.cts",
-        "default": "./index.d.ts"
-      },
-      "import": "./index.js",
-      "require": "./index.cjs"
+        "import": "./dist/index.d.ts",
+        "require": "./dist/index.d.cts",
+        "default": "./dist/index.d.ts"
+      }
     },
     "./package.json": "./package.json"
   },
   "files": [
     "dist/",
-    "index.cjs",
-    "index.js",
-    "index.d.ts",
-    "index.d.cts"
+    "src/"
   ]
 }
