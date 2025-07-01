@@ -6,8 +6,8 @@
   "engines": {
     "node": ">=18"
   },
-  "main": "./index.js",
-  "types": "./index.d.ts",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
   "repository": {
     "type": "git",
     "url": "git@github.com:langchain-ai/langchainjs.git"
@@ -67,21 +67,13 @@
   },
   "exports": {
     ".": {
-      "types": {
-        "import": "./index.d.ts",
-        "require": "./index.d.cts",
-        "default": "./index.d.ts"
-      },
-      "import": "./index.js",
-      "require": "./index.cjs"
+      "import": "./src/index.ts",
+      "require": "./src/index.ts",
+      "types": "./src/index.ts"
     },
     "./package.json": "./package.json"
   },
   "files": [
-    "dist/",
-    "index.cjs",
-    "index.js",
-    "index.d.ts",
-    "index.d.cts"
+    "src/"
   ]
 }
